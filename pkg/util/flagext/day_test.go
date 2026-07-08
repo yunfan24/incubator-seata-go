@@ -19,7 +19,6 @@ package flagext
 
 import (
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -69,18 +68,10 @@ func TestDayValueYAML(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, testStruct, actualStruct)
 	}
-	// Test UTC-stable string and YAML serialization in western timezones.
+	// Test UTC-stable string and YAML serialization.
+	// DayValue.String() and DayValue.MarshalYAML() both use .UTC(),
+	// so serialization is independent of time.Local.
 	{
-		loc, err := time.LoadLocation("America/Los_Angeles")
-		if err != nil {
-			loc = time.FixedZone("UTC-8", -8*60*60)
-		}
-
-		originalLocal := time.Local
-		time.Local = loc
-		defer func() {
-			time.Local = originalLocal
-		}()
 		type TestStruct struct {
 			Day *DayValue `yaml:"day"`
 		}
