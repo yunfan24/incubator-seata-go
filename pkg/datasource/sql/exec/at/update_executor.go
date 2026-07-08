@@ -118,15 +118,44 @@ func (u *updateExecutor) beforeImage(ctx context.Context) (*types.RecordImage, e
 	}
 	if ok {
 		rowsi, err = util.CtxDriverQuery(ctx, queryerCtx, queryer, selectSQL, selectArgs)
+		if err != nil && !strings.Contains(err.Error(), "skip fast-path") {
+			log.Errorf("ctx driver query: %+v", err)
+			return nil, err
+		}
+
+		// If skip fast-path error, fallback to prepared statement
+		if err != nil {
+			log.Debugf("direct query not supported, falling back to prepared statement")
+			stmt, prepErr := u.execContext.Conn.Prepare(selectSQL)
+			if prepErr != nil {
+				log.Errorf("prepare statement failed: %+v", prepErr)
+				return nil, prepErr
+			}
+
+			if stmtQueryCtx, ok := stmt.(driver.StmtQueryContext); ok {
+				rowsi, err = stmtQueryCtx.QueryContext(ctx, selectArgs)
+			} else {
+				dargs := make([]driver.Value, len(selectArgs))
+				for i, arg := range selectArgs {
+					dargs[i] = arg.Value
+				}
+				rowsi, err = stmt.Query(dargs)
+			}
+
+			if err != nil {
+				stmt.Close()
+				return nil, err
+			}
+
+			// Wrap rows with statement to close both together
+			rowsi = &rowsWithStmt{Rows: rowsi, stmt: stmt}
+		}
+
 		defer func() {
 			if rowsi != nil {
 				rowsi.Close()
 			}
 		}()
-		if err != nil {
-			log.Errorf("ctx driver query: %+v", err)
-			return nil, err
-		}
 	} else {
 		log.Errorf("target conn should been driver.QueryerContext or driver.Queryer")
 		return nil, fmt.Errorf("invalid conn")
@@ -169,15 +198,44 @@ func (u *updateExecutor) afterImage(ctx context.Context, beforeImage types.Recor
 	}
 	if ok {
 		rowsi, err = util.CtxDriverQuery(ctx, queryerCtx, queryer, selectSQL, selectArgs)
+		if err != nil && !strings.Contains(err.Error(), "skip fast-path") {
+			log.Errorf("ctx driver query: %+v", err)
+			return nil, err
+		}
+
+		// If skip fast-path error, fallback to prepared statement
+		if err != nil {
+			log.Debugf("direct query not supported, falling back to prepared statement")
+			stmt, prepErr := u.execContext.Conn.Prepare(selectSQL)
+			if prepErr != nil {
+				log.Errorf("prepare statement failed: %+v", prepErr)
+				return nil, prepErr
+			}
+
+			if stmtQueryCtx, ok := stmt.(driver.StmtQueryContext); ok {
+				rowsi, err = stmtQueryCtx.QueryContext(ctx, selectArgs)
+			} else {
+				dargs := make([]driver.Value, len(selectArgs))
+				for i, arg := range selectArgs {
+					dargs[i] = arg.Value
+				}
+				rowsi, err = stmt.Query(dargs)
+			}
+
+			if err != nil {
+				stmt.Close()
+				return nil, err
+			}
+
+			// Wrap rows with statement to close both together
+			rowsi = &rowsWithStmt{Rows: rowsi, stmt: stmt}
+		}
+
 		defer func() {
 			if rowsi != nil {
 				rowsi.Close()
 			}
 		}()
-		if err != nil {
-			log.Errorf("ctx driver query: %+v", err)
-			return nil, err
-		}
 	} else {
 		log.Errorf("target conn should been driver.QueryerContext or driver.Queryer")
 		return nil, fmt.Errorf("invalid conn")

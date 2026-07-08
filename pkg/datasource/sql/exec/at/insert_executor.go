@@ -244,23 +244,80 @@ func (i *insertExecutor) buildPostgreSQLReturningInsertSQL(meta *types.TableMeta
 	return trimTrailingSemicolon(i.execContext.Query) + " RETURNING " + strings.Join(returningColumns, ", "), nil
 }
 
+// rowsWithStmt wraps driver.Rows and closes the statement when rows are closed
+type rowsWithStmt struct {
+	driver.Rows
+	stmt driver.Stmt
+}
+
+func (r *rowsWithStmt) Close() error {
+	rowsErr := r.Rows.Close()
+	stmtErr := r.stmt.Close()
+	if rowsErr != nil {
+		return rowsErr
+	}
+	return stmtErr
+}
+
 func (i *insertExecutor) queryRows(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
+	// Try direct query first
 	queryerCtx, ok := i.execContext.Conn.(driver.QueryerContext)
 	var queryer driver.Queryer
 	if !ok {
 		queryer, ok = i.execContext.Conn.(driver.Queryer)
 	}
-	if !ok {
-		log.Errorf("target conn should been driver.QueryerContext or driver.Queryer")
-		return nil, fmt.Errorf("invalid conn")
+
+	if ok {
+		rowsi, err := util.CtxDriverQuery(ctx, queryerCtx, queryer, query, args)
+		if err == nil {
+			return rowsi, nil
+		}
+		// If not skip-fast-path error, return the error
+		if !strings.Contains(err.Error(), "skip fast-path") {
+			log.Errorf("ctx driver query: %+v", err)
+			return nil, err
+		}
+		// skip-fast-path error, fallback to prepared statement
+		log.Debugf("direct query not supported, falling back to prepared statement")
 	}
 
-	rowsi, err := util.CtxDriverQuery(ctx, queryerCtx, queryer, query, args)
+	// Fallback: use PrepareContext + QueryContext
+	stmt, err := i.execContext.Conn.Prepare(query)
 	if err != nil {
-		log.Errorf("ctx driver query: %+v", err)
+		log.Errorf("prepare statement failed: %+v", err)
 		return nil, err
 	}
-	return rowsi, nil
+
+	var rows driver.Rows
+	if stmtQueryCtx, ok := stmt.(driver.StmtQueryContext); ok {
+		rows, err = stmtQueryCtx.QueryContext(ctx, args)
+	} else {
+		var dargs []driver.Value
+		dargs, err = namedValuesToValues(args)
+		if err != nil {
+			stmt.Close()
+			return nil, err
+		}
+		rows, err = stmt.Query(dargs)
+	}
+
+	if err != nil {
+		stmt.Close()
+		return nil, err
+	}
+
+	return &rowsWithStmt{Rows: rows, stmt: stmt}, nil
+}
+
+func namedValuesToValues(named []driver.NamedValue) ([]driver.Value, error) {
+	dargs := make([]driver.Value, len(named))
+	for n, param := range named {
+		if len(param.Name) > 0 {
+			return nil, errors.New("sql: driver does not support the use of Named Parameters")
+		}
+		dargs[n] = param.Value
+	}
+	return dargs, nil
 }
 
 func trimTrailingSemicolon(query string) string {

@@ -22,12 +22,28 @@ import (
 	gosql "database/sql"
 	"database/sql/driver"
 	"errors"
+	"strings"
 
 	"seata.apache.org/seata-go/v2/pkg/datasource/sql/exec"
 	"seata.apache.org/seata-go/v2/pkg/datasource/sql/types"
 	"seata.apache.org/seata-go/v2/pkg/tm"
 	"seata.apache.org/seata-go/v2/pkg/util/log"
 )
+
+// rowsWithStmt wraps driver.Rows and closes the statement when rows are closed
+type rowsWithStmt struct {
+	driver.Rows
+	stmt driver.Stmt
+}
+
+func (r *rowsWithStmt) Close() error {
+	rowsErr := r.Rows.Close()
+	stmtErr := r.stmt.Close()
+	if rowsErr != nil {
+		return rowsErr
+	}
+	return stmtErr
+}
 
 // ATConn Database connection proxy object under XA transaction model
 // Conn is assumed to be stateful.
@@ -63,13 +79,43 @@ func (c *ATConn) ExecContext(ctx context.Context, query string, args []driver.Na
 		ret, err := executor.ExecWithNamedValue(ctx, execCtx,
 			func(ctx context.Context, query string, args []driver.NamedValue) (types.ExecResult, error) {
 				ret, err := c.Conn.ExecContext(ctx, query, args)
-				if err != nil {
-					return nil, err
+				if err == nil {
+					return types.NewResult(types.WithResult(ret)), nil
 				}
-				return types.NewResult(types.WithResult(ret)), nil
+
+				// If skip fast-path error, fallback to prepared statement
+				if strings.Contains(err.Error(), "skip fast-path") {
+					stmt, prepErr := c.Conn.Prepare(query)
+					if prepErr != nil {
+						return nil, prepErr
+					}
+					defer stmt.Close()
+
+					var result driver.Result
+					if stmtExecCtx, ok := stmt.(driver.StmtExecContext); ok {
+						result, err = stmtExecCtx.ExecContext(ctx, args)
+					} else {
+						dargs := make([]driver.Value, len(args))
+						for i, arg := range args {
+							dargs[i] = arg.Value
+						}
+						result, err = stmt.Exec(dargs)
+					}
+
+					if err != nil {
+						return nil, err
+					}
+
+					return types.NewResult(types.WithResult(result)), nil
+				}
+
+				return nil, err
 			})
 
-		return ret, err
+		if err != nil {
+			return nil, err
+		}
+		return ret, nil
 	})
 	if err != nil {
 		return nil, err
@@ -95,14 +141,45 @@ func (c *ATConn) QueryContext(ctx context.Context, query string, args []driver.N
 
 		ret, err := executor.ExecWithNamedValue(ctx, execCtx,
 			func(ctx context.Context, query string, args []driver.NamedValue) (types.ExecResult, error) {
-				ret, err := c.Conn.QueryContext(ctx, query, args)
-				if err != nil {
-					return nil, err
+				rows, err := c.Conn.QueryContext(ctx, query, args)
+				if err == nil {
+					return types.NewResult(types.WithRows(rows)), nil
 				}
-				return types.NewResult(types.WithRows(ret)), nil
+
+				// If skip fast-path error, fallback to prepared statement
+				if strings.Contains(err.Error(), "skip fast-path") {
+					stmt, prepErr := c.Conn.Prepare(query)
+					if prepErr != nil {
+						return nil, prepErr
+					}
+
+					if stmtQueryCtx, ok := stmt.(driver.StmtQueryContext); ok {
+						rows, err = stmtQueryCtx.QueryContext(ctx, args)
+					} else {
+						dargs := make([]driver.Value, len(args))
+						for i, arg := range args {
+							dargs[i] = arg.Value
+						}
+						rows, err = stmt.Query(dargs)
+					}
+
+					if err != nil {
+						stmt.Close()
+						return nil, err
+					}
+
+					// Wrap rows with statement to close both together
+					wrappedRows := &rowsWithStmt{Rows: rows, stmt: stmt}
+					return types.NewResult(types.WithRows(wrappedRows)), nil
+				}
+
+				return nil, err
 			})
 
-		return ret, err
+		if err != nil {
+			return nil, err
+		}
+		return ret, nil
 	})
 	if err != nil {
 		return nil, err
@@ -114,14 +191,17 @@ func (c *ATConn) QueryContext(ctx context.Context, query string, args []driver.N
 func (c *ATConn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
 	c.autoCommit = false
 
-	c.txCtx = types.NewTxCtx()
-	c.txCtx.DBType = c.res.dbType
-	c.txCtx.TxOpt = opts
-	c.txCtx.ResourceID = c.res.resourceID
+	// Only create new txCtx if not already in a global transaction (auto-commit case)
+	if c.txCtx.XID == "" {
+		c.txCtx = types.NewTxCtx()
+		c.txCtx.DBType = c.res.dbType
+		c.txCtx.TxOpt = opts
+		c.txCtx.ResourceID = c.res.resourceID
 
-	if tm.IsGlobalTx(ctx) {
-		c.txCtx.XID = tm.GetXID(ctx)
-		c.txCtx.TransactionMode = types.ATMode
+		if tm.IsGlobalTx(ctx) {
+			c.txCtx.XID = tm.GetXID(ctx)
+			c.txCtx.TransactionMode = types.ATMode
+		}
 	}
 
 	tx, err := c.Conn.BeginTx(ctx, opts)
