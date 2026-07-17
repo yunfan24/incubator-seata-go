@@ -31,12 +31,14 @@ type SeataMQProducerConfig struct {
 
 	RetryTimesWhenSendFailed int
 	SendMsgTimeout           time.Duration
+	ConnPoolSize             int
 }
 
 func NewDefaultSeataMQProducerConfig() *SeataMQProducerConfig {
 	return &SeataMQProducerConfig{
 		RetryTimesWhenSendFailed: 3,
 		SendMsgTimeout:           3 * time.Second,
+		ConnPoolSize:             4,
 	}
 }
 

@@ -21,6 +21,7 @@ const (
 	FILE         string = "file"
 	NACOS        string = "nacos"
 	ETCD         string = "etcd"
+	ETCD3        string = "etcd3"
 	EUREKA       string = "eureka"
 	REDIS        string = "redis"
 	ZK           string = "zk"
@@ -38,4 +39,9 @@ type ServiceInstance struct {
 type RegistryService interface {
 	Lookup(key string) ([]*ServiceInstance, error)
 	Close()
+}
+
+type RegisterableRegistryService interface {
+	Register(instance *ServiceInstance) error
+	Unregister(instance *ServiceInstance) error
 }

@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/apache/rocketmq-client-go/v2/primitive"
 	"github.com/apache/rocketmq-client-go/v2/producer"
@@ -68,6 +69,13 @@ func NewSeataMQProducer(cfg *SeataMQProducerConfig) (*SeataMQProducer, error) {
 
 	if cfg.GroupName == "" {
 		return nil, fmt.Errorf("GroupName cannot be empty")
+	}
+
+	if cfg.SendMsgTimeout <= 0 {
+		cfg.SendMsgTimeout = 3 * time.Second
+	}
+	if cfg.ConnPoolSize <= 0 {
+		cfg.ConnPoolSize = 4
 	}
 
 	p := &SeataMQProducer{
@@ -138,6 +146,11 @@ func (p *SeataMQProducer) Shutdown() error {
 	}
 	if err := p.normalProducer.Shutdown(); err != nil {
 		errs = append(errs, err)
+	}
+	if p.tccAction != nil && p.tccAction.sender != nil {
+		if err := p.tccAction.sender.Close(); err != nil {
+			errs = append(errs, err)
+		}
 	}
 
 	if len(errs) > 0 {
