@@ -28,6 +28,7 @@ Seata-go 是一款开源的分布式事务解决方案，提供高性能和简�
 
 - [[#123](https://github.com/apache/incubator-seata-go/pull/123)] 添加二阶段事务接口，以及dubbo集成
 - 支持基于 pgx 驱动的 PostgreSQL XA
+- [[#1130](https://github.com/apache/incubator-seata-go/issues/1130)] 支持 AT 模式下 MySQL 多值 INSERT 的复合主键与混合主键场景
 
 ### bugfix：
 

@@ -22,6 +22,7 @@ import (
 	"database/sql/driver"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/pingcap/tidb/pkg/parser/ast"
@@ -487,17 +488,26 @@ func (i *insertExecutor) getPkIndex(InsertStmt *ast.InsertStmt, meta types.Table
 		return pkIndexMap
 	}
 	insertColumnsSize := len(InsertStmt.Columns)
-	if insertColumnsSize == 0 {
+	if meta.ColumnNames == nil {
 		return pkIndexMap
 	}
-	if meta.ColumnNames == nil {
+	if insertColumnsSize == 0 {
+		if len(InsertStmt.Lists) == 0 {
+			return pkIndexMap
+		}
+		// INSERT without a column list follows the physical table column order.
+		for idx, columnName := range meta.ColumnNames {
+			if pkColumnName, ok := i.matchPKColumnName(columnName, meta); ok {
+				pkIndexMap[pkColumnName] = idx
+			}
+		}
 		return pkIndexMap
 	}
 	if len(meta.Columns) > 0 {
 		for paramIdx := 0; paramIdx < insertColumnsSize; paramIdx++ {
 			sqlColumnName := InsertStmt.Columns[paramIdx].Name.O
-			if i.containPK(sqlColumnName, meta) {
-				pkIndexMap[sqlColumnName] = paramIdx
+			if pkColumnName, ok := i.matchPKColumnName(sqlColumnName, meta); ok {
+				pkIndexMap[pkColumnName] = paramIdx
 			}
 		}
 		return pkIndexMap
@@ -514,6 +524,16 @@ func (i *insertExecutor) getPkIndex(InsertStmt *ast.InsertStmt, meta types.Table
 	}
 
 	return pkIndexMap
+}
+
+func (i *insertExecutor) matchPKColumnName(columnName string, meta types.TableMeta) (string, bool) {
+	newColumnName := util.DelEscape(columnName, i.dbType())
+	for _, name := range meta.GetPrimaryKeyOnlyName() {
+		if strings.EqualFold(name, newColumnName) {
+			return name, true
+		}
+	}
+	return "", false
 }
 
 // parsePkValuesFromStatement parse primary key value from statement.
@@ -590,9 +610,7 @@ func (i *insertExecutor) parsePkValuesFromStatement(insertStmt *ast.InsertStmt, 
 				} else {
 					pkValues = append(pkValues, pkValue)
 				}
-				if _, ok := pkValuesMap[pkKey]; !ok {
-					pkValuesMap[pkKey] = pkValues
-				}
+				pkValuesMap[pkKey] = pkValues
 			}
 		}
 	} else {
@@ -707,7 +725,7 @@ func (i *insertExecutor) getPkValuesByAuto(ctx context.Context, execCtx *types.E
 
 	// If there is batch insert
 	// do auto increment base LAST_INSERT_ID and variable `auto_increment_increment`
-	if lastInsertId > 0 && updateCount > 1 && canAutoIncrement(pkMetaMap) {
+	if lastInsertId > 0 && updateCount > 1 && canAutoGeneratePKs(pkMetaMap) {
 		return i.autoGeneratePks(execCtx, autoColumnName, lastInsertId, updateCount)
 	}
 
@@ -721,12 +739,11 @@ func (i *insertExecutor) getPkValuesByAuto(ctx context.Context, execCtx *types.E
 	return nil, nil
 }
 
-func canAutoIncrement(pkMetaMap map[string]types.ColumnMeta) bool {
-	if len(pkMetaMap) != 1 {
-		return false
-	}
+func canAutoGeneratePKs(pkMetaMap map[string]types.ColumnMeta) bool {
 	for _, meta := range pkMetaMap {
-		return meta.Autoincrement
+		if meta.Autoincrement {
+			return true
+		}
 	}
 	return false
 }
@@ -746,22 +763,27 @@ func (i *insertExecutor) autoGeneratePks(execCtx *types.ExecContext, autoColumnN
 			log.Errorf("build prepare stmt: %+v", err)
 			return nil, err
 		}
+		defer stmt.Close()
 
 		rows, err := stmt.Query(nil)
 		if err != nil {
 			log.Errorf("stmt query: %+v", err)
 			return nil, err
 		}
+		defer rows.Close()
 
-		if len(rows.Columns()) > 0 {
-			var curStep []driver.Value
+		columns := rows.Columns()
+		if len(columns) > 1 {
+			curStep := make([]driver.Value, len(columns))
 			if err := rows.Next(curStep); err != nil {
 				return nil, err
 			}
 
-			if curStepInt, ok := curStep[0].(int64); ok {
-				step = curStepInt
+			curStepInt, err := parseAutoIncrementStep(curStep[1])
+			if err != nil {
+				return nil, err
 			}
+			step = curStepInt
 		} else {
 			return nil, fmt.Errorf("query is empty")
 		}
@@ -780,11 +802,24 @@ func (i *insertExecutor) autoGeneratePks(execCtx *types.ExecContext, autoColumnN
 	return pkValuesMap, nil
 }
 
+func parseAutoIncrementStep(value driver.Value) (int64, error) {
+	switch v := value.(type) {
+	case int64:
+		return v, nil
+	case []byte:
+		return strconv.ParseInt(string(v), 10, 64)
+	case string:
+		return strconv.ParseInt(v, 10, 64)
+	default:
+		return 0, fmt.Errorf("unsupported auto_increment_increment value type %T", value)
+	}
+}
+
 func pkValuesMapMerge(dest *map[string][]interface{}, src map[string][]interface{}) {
 	for k, v := range src {
 		tmpK := k
 		tmpV := v
-		(*dest)[tmpK] = append((*dest)[tmpK], tmpV)
+		(*dest)[tmpK] = tmpV
 	}
 }
 

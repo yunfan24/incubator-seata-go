@@ -107,6 +107,225 @@ func TestBuildSelectSQLByInsert(t *testing.T) {
 			expectQuery:     "SELECT user_id, name FROM user WHERE (`user_id`) IN ((?)) ",
 			expectQueryArgs: []driver.Value{int64(20)},
 		},
+		{
+			name:  "single pk without explicit columns",
+			query: "insert into user values (19,'Tony'),(21,'tony')",
+			metaData: types.TableMeta{
+				ColumnNames: []string{"id", "name"},
+				Indexs: map[string]types.IndexMeta{
+					"id": {
+						IType:      types.IndexTypePrimaryKey,
+						ColumnName: "id",
+						Columns: []types.ColumnMeta{
+							{
+								ColumnName:         "id",
+								DatabaseType:       types.GetSqlDataType("BIGINT"),
+								DatabaseTypeString: "BIGINT",
+							},
+						},
+					},
+				},
+				Columns: map[string]types.ColumnMeta{
+					"id":   {ColumnName: "id"},
+					"name": {ColumnName: "name"},
+				},
+			},
+			expectQuery:     "SELECT id, name FROM user WHERE (`id`) IN ((?),(?)) ",
+			expectQueryArgs: []driver.Value{int64(19), int64(21)},
+		},
+		{
+			name:  "composite pk explicit values",
+			query: "insert into user(id,tenant_id,name) values (19,100,'Tony'),(21,101,'tony')",
+			metaData: types.TableMeta{
+				ColumnNames: []string{"id", "tenant_id", "name"},
+				Indexs: map[string]types.IndexMeta{
+					"PRIMARY": {
+						IType: types.IndexTypePrimaryKey,
+						Columns: []types.ColumnMeta{
+							{
+								ColumnName:         "id",
+								DatabaseType:       types.GetSqlDataType("BIGINT"),
+								DatabaseTypeString: "BIGINT",
+							},
+							{
+								ColumnName:         "tenant_id",
+								DatabaseType:       types.GetSqlDataType("BIGINT"),
+								DatabaseTypeString: "BIGINT",
+							},
+						},
+					},
+				},
+				Columns: map[string]types.ColumnMeta{
+					"id":        {ColumnName: "id"},
+					"tenant_id": {ColumnName: "tenant_id"},
+					"name":      {ColumnName: "name"},
+				},
+			},
+			expectQuery:     "SELECT id, tenant_id, name FROM user WHERE (`id`,`tenant_id`) IN ((?,?),(?,?)) ",
+			expectQueryArgs: []driver.Value{int64(19), int64(100), int64(21), int64(101)},
+		},
+		{
+			name:  "composite pk without explicit columns",
+			query: "insert into user values (19,100,'Tony'),(21,101,'tony')",
+			metaData: types.TableMeta{
+				ColumnNames: []string{"id", "tenant_id", "name"},
+				Indexs: map[string]types.IndexMeta{
+					"PRIMARY": {
+						IType: types.IndexTypePrimaryKey,
+						Columns: []types.ColumnMeta{
+							{
+								ColumnName:         "id",
+								DatabaseType:       types.GetSqlDataType("BIGINT"),
+								DatabaseTypeString: "BIGINT",
+							},
+							{
+								ColumnName:         "tenant_id",
+								DatabaseType:       types.GetSqlDataType("BIGINT"),
+								DatabaseTypeString: "BIGINT",
+							},
+						},
+					},
+				},
+				Columns: map[string]types.ColumnMeta{
+					"id":        {ColumnName: "id"},
+					"tenant_id": {ColumnName: "tenant_id"},
+					"name":      {ColumnName: "name"},
+				},
+			},
+			expectQuery:     "SELECT id, tenant_id, name FROM user WHERE (`id`,`tenant_id`) IN ((?,?),(?,?)) ",
+			expectQueryArgs: []driver.Value{int64(19), int64(100), int64(21), int64(101)},
+		},
+		{
+			name:  "composite pk escaped explicit values",
+			query: "insert into user(`id`,`tenant_id`,name) values (19,100,'Tony'),(21,101,'tony')",
+			metaData: types.TableMeta{
+				ColumnNames: []string{"id", "tenant_id", "name"},
+				Indexs: map[string]types.IndexMeta{
+					"PRIMARY": {
+						IType: types.IndexTypePrimaryKey,
+						Columns: []types.ColumnMeta{
+							{
+								ColumnName:         "id",
+								DatabaseType:       types.GetSqlDataType("BIGINT"),
+								DatabaseTypeString: "BIGINT",
+							},
+							{
+								ColumnName:         "tenant_id",
+								DatabaseType:       types.GetSqlDataType("BIGINT"),
+								DatabaseTypeString: "BIGINT",
+							},
+						},
+					},
+				},
+				Columns: map[string]types.ColumnMeta{
+					"id":        {ColumnName: "id"},
+					"tenant_id": {ColumnName: "tenant_id"},
+					"name":      {ColumnName: "name"},
+				},
+			},
+			expectQuery:     "SELECT id, tenant_id, name FROM user WHERE (`id`,`tenant_id`) IN ((?,?),(?,?)) ",
+			expectQueryArgs: []driver.Value{int64(19), int64(100), int64(21), int64(101)},
+		},
+		{
+			name:        "composite pk prepared explicit values",
+			query:       "insert into user(id,tenant_id,name) values (?,?,?),(?,?,?)",
+			NamedValues: []driver.NamedValue{{Ordinal: 1, Value: int64(19)}, {Ordinal: 2, Value: int64(100)}, {Ordinal: 3, Value: "Tony"}, {Ordinal: 4, Value: int64(21)}, {Ordinal: 5, Value: int64(101)}, {Ordinal: 6, Value: "tony"}},
+			metaData: types.TableMeta{
+				ColumnNames: []string{"id", "tenant_id", "name"},
+				Indexs: map[string]types.IndexMeta{
+					"PRIMARY": {
+						IType: types.IndexTypePrimaryKey,
+						Columns: []types.ColumnMeta{
+							{
+								ColumnName:         "id",
+								DatabaseType:       types.GetSqlDataType("BIGINT"),
+								DatabaseTypeString: "BIGINT",
+							},
+							{
+								ColumnName:         "tenant_id",
+								DatabaseType:       types.GetSqlDataType("BIGINT"),
+								DatabaseTypeString: "BIGINT",
+							},
+						},
+					},
+				},
+				Columns: map[string]types.ColumnMeta{
+					"id":        {ColumnName: "id"},
+					"tenant_id": {ColumnName: "tenant_id"},
+					"name":      {ColumnName: "name"},
+				},
+			},
+			expectQuery:     "SELECT id, tenant_id, name FROM user WHERE (`id`,`tenant_id`) IN ((?,?),(?,?)) ",
+			expectQueryArgs: []driver.Value{int64(19), int64(100), int64(21), int64(101)},
+		},
+		{
+			name:  "composite pk omitted auto increment column",
+			query: "insert into user(tenant_id,name) values (100,'Tony'),(101,'tony')",
+			metaData: types.TableMeta{
+				ColumnNames: []string{"id", "tenant_id", "name"},
+				Indexs: map[string]types.IndexMeta{
+					"PRIMARY": {
+						IType: types.IndexTypePrimaryKey,
+						Columns: []types.ColumnMeta{
+							{
+								ColumnName:         "id",
+								DatabaseType:       types.GetSqlDataType("BIGINT"),
+								DatabaseTypeString: "BIGINT",
+								Autoincrement:      true,
+							},
+							{
+								ColumnName:         "tenant_id",
+								DatabaseType:       types.GetSqlDataType("BIGINT"),
+								DatabaseTypeString: "BIGINT",
+							},
+						},
+					},
+				},
+				Columns: map[string]types.ColumnMeta{
+					"id":        {ColumnName: "id"},
+					"tenant_id": {ColumnName: "tenant_id"},
+					"name":      {ColumnName: "name"},
+				},
+			},
+			mockInsertResult: mockInsertResult{lastInsertID: 19, rowsAffected: 2},
+			IncrementStep:    2,
+			expectQuery:      "SELECT id, tenant_id, name FROM user WHERE (`id`,`tenant_id`) IN ((?,?),(?,?)) ",
+			expectQueryArgs:  []driver.Value{int64(19), int64(100), int64(21), int64(101)},
+		},
+		{
+			name:  "composite pk null auto increment column",
+			query: "insert into user(id,tenant_id,name) values (NULL,100,'Tony'),(NULL,101,'tony')",
+			metaData: types.TableMeta{
+				ColumnNames: []string{"id", "tenant_id", "name"},
+				Indexs: map[string]types.IndexMeta{
+					"PRIMARY": {
+						IType: types.IndexTypePrimaryKey,
+						Columns: []types.ColumnMeta{
+							{
+								ColumnName:         "id",
+								DatabaseType:       types.GetSqlDataType("BIGINT"),
+								DatabaseTypeString: "BIGINT",
+								Autoincrement:      true,
+							},
+							{
+								ColumnName:         "tenant_id",
+								DatabaseType:       types.GetSqlDataType("BIGINT"),
+								DatabaseTypeString: "BIGINT",
+							},
+						},
+					},
+				},
+				Columns: map[string]types.ColumnMeta{
+					"id":        {ColumnName: "id"},
+					"tenant_id": {ColumnName: "tenant_id"},
+					"name":      {ColumnName: "name"},
+				},
+			},
+			mockInsertResult: mockInsertResult{lastInsertID: 19, rowsAffected: 2},
+			IncrementStep:    2,
+			expectQuery:      "SELECT id, tenant_id, name FROM user WHERE (`id`,`tenant_id`) IN ((?,?),(?,?)) ",
+			expectQueryArgs:  []driver.Value{int64(19), int64(100), int64(21), int64(101)},
+		},
 	}
 
 	for _, test := range tests {
@@ -871,6 +1090,18 @@ func TestMySQLInsertUndoLogBuilder_autoGeneratePks(t *testing.T) {
 		}, want: map[string][]interface{}{
 			"id": {int64(100)},
 		}},
+		{name: "query auto increment step", fields: fields{
+			IncrementStep: 0,
+		}, args: args{
+			execCtx: &types.ExecContext{
+				Conn: &autoIncrementStepConn{value: []byte("2")},
+			},
+			autoColumnName: "id",
+			lastInsetId:    100,
+			updateCount:    3,
+		}, want: map[string][]interface{}{
+			"id": {int64(100), int64(102), int64(104)},
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -885,4 +1116,58 @@ func TestMySQLInsertUndoLogBuilder_autoGeneratePks(t *testing.T) {
 			assert.Equalf(t, tt.want, got, "autoGeneratePks(%v, %v, %v, %v)", tt.args.execCtx, tt.args.autoColumnName, tt.args.lastInsetId, tt.args.updateCount)
 		})
 	}
+}
+
+type autoIncrementStepConn struct {
+	value driver.Value
+}
+
+func (c *autoIncrementStepConn) Prepare(query string) (driver.Stmt, error) {
+	return &autoIncrementStepStmt{value: c.value}, nil
+}
+
+func (c *autoIncrementStepConn) Close() error {
+	return nil
+}
+
+func (c *autoIncrementStepConn) Begin() (driver.Tx, error) {
+	return nil, nil
+}
+
+type autoIncrementStepStmt struct {
+	value driver.Value
+}
+
+func (s *autoIncrementStepStmt) Close() error {
+	return nil
+}
+
+func (s *autoIncrementStepStmt) NumInput() int {
+	return 0
+}
+
+func (s *autoIncrementStepStmt) Exec(args []driver.Value) (driver.Result, error) {
+	return nil, nil
+}
+
+func (s *autoIncrementStepStmt) Query(args []driver.Value) (driver.Rows, error) {
+	return &autoIncrementStepRows{value: s.value}, nil
+}
+
+type autoIncrementStepRows struct {
+	value driver.Value
+}
+
+func (r *autoIncrementStepRows) Columns() []string {
+	return []string{"Variable_name", "Value"}
+}
+
+func (r *autoIncrementStepRows) Close() error {
+	return nil
+}
+
+func (r *autoIncrementStepRows) Next(dest []driver.Value) error {
+	dest[0] = "auto_increment_increment"
+	dest[1] = r.value
+	return nil
 }
