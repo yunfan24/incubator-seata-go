@@ -34,9 +34,14 @@ Seata-go 是一款开源的分布式事务解决方案，提供高性能和简�
 
 - [[#130](https://github.com/apache/incubator-seata-go/pull/130)] 修复getty session自动关闭的bug
 
+### 破坏性变更：
+
+- 将最低 Go 版本从 1.20 升级到 1.25（上游 `github.com/pingcap/tidb/pkg/parser` 要求）。所有下游用户需升级到 Go 1.25+。
+
 ### optimize：
 
 - [[#125](https://github.com/apache/incubator-seata-go/pull/125)] 优化resourceManagerApi和tccResource功能
+- 将 `github.com/arana-db/parser` 替换为上游 `github.com/pingcap/tidb/pkg/parser`，避免依赖可能停更的 fork
 
 ### test:
 

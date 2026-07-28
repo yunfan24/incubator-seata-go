@@ -138,3 +138,82 @@ func assertParamMarkerOrders(t *testing.T, stmtNodes []ast.StmtNode, expected []
 	}
 	assert.Equal(t, expected, orders)
 }
+
+func TestAssignParamMarkerOrdersComplex(t *testing.T) {
+	tests := []struct {
+		name     string
+		sql      string
+		expected []int
+	}{
+		{
+			name:     "IN clause",
+			sql:      "SELECT * FROM t WHERE id IN (?, ?, ?)",
+			expected: []int{0, 1, 2},
+		},
+		{
+			name:     "subquery",
+			sql:      "SELECT * FROM t WHERE id IN (SELECT id FROM t2 WHERE val = ?)",
+			expected: []int{0},
+		},
+		{
+			name:     "subquery with outer",
+			sql:      "SELECT * FROM t WHERE id = ? AND id IN (SELECT id FROM t2 WHERE val = ?)",
+			expected: []int{0, 1},
+		},
+		{
+			name:     "ON DUPLICATE KEY UPDATE",
+			sql:      "INSERT INTO t (a, b) VALUES (?, ?) ON DUPLICATE KEY UPDATE a = VALUES(a), b = ?",
+			expected: []int{0, 1, 2},
+		},
+		{
+			name:     "UPDATE with WHERE and SET",
+			sql:      "UPDATE t SET a = ?, b = ? WHERE c = ? AND d IN (?, ?)",
+			expected: []int{0, 1, 2, 3, 4},
+		},
+		{
+			name:     "BETWEEN",
+			sql:      "SELECT * FROM t WHERE a BETWEEN ? AND ?",
+			expected: []int{0, 1},
+		},
+		{
+			name:     "nested subquery",
+			sql:      "SELECT * FROM t WHERE id = ? AND val IN (SELECT id FROM t2 WHERE x = ? AND y IN (?, ?))",
+			expected: []int{0, 1, 2, 3},
+		},
+		{
+			name:     "multi-statement",
+			sql:      "INSERT INTO t VALUES (?); UPDATE t SET a = ? WHERE b = ?; DELETE FROM t WHERE c = ?",
+			expected: []int{0, 1, 2, 3},
+		},
+		{
+			name:     "JOIN with ON",
+			sql:      "SELECT * FROM t1 JOIN t2 ON t1.id = t2.id WHERE t1.a = ? AND t2.b = ?",
+			expected: []int{0, 1},
+		},
+		{
+			name:     "BETWEEN in UPDATE",
+			sql:      "UPDATE t SET a = ? WHERE b BETWEEN ? AND ? OR c = ?",
+			expected: []int{0, 1, 2, 3},
+		},
+		{
+			name:     "INSERT with multiple VALUES",
+			sql:      "INSERT INTO t (a, b, c) VALUES (?, ?, ?), (?, ?, ?)",
+			expected: []int{0, 1, 2, 3, 4, 5},
+		},
+		{
+			name:     "DELETE with complex WHERE",
+			sql:      "DELETE FROM t WHERE (a = ? OR b = ?) AND c IN (?, ?) AND d BETWEEN ? AND ?",
+			expected: []int{0, 1, 2, 3, 4, 5},
+		},
+	}
+
+	p := aparser.New()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stmtNodes, _, err := p.Parse(tt.sql, "", "")
+			assert.NoError(t, err)
+			assignParamMarkerOrders(stmtNodes)
+			assertParamMarkerOrders(t, stmtNodes, tt.expected)
+		})
+	}
+}
