@@ -1094,7 +1094,7 @@ func TestATTxCommitFailureDiscardsConnection(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			defer ctrl.Finish()
 
-			var primaryErr error = errors.New(name)
+			primaryErr := errors.New(name)
 			localTx := mock.NewMockTestDriverTx(ctrl)
 			var cleanupErr error
 			expectedOutcome := atCommitOutcomeCommitUnknown
